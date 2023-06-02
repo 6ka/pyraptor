@@ -758,7 +758,7 @@ class Journey:
                 + "(p. "
                 + str(leg.to_stop.platform_code).rjust(3)
                 + ") WITH "
-                + str(leg.trip.hint)
+                + str(leg.trip.long_name)
             )
             logger.info(msg)
 
