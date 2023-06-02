@@ -12,6 +12,7 @@ from pyraptor.model.raptor import (
     best_stop_at_target_station,
 )
 from pyraptor.util import str2sec
+import time
 
 
 def parse_arguments():
@@ -76,15 +77,18 @@ def main(
     logger.debug("Departure time (s.)  : " + str(dep_secs))
 
     # Find route between two stations
+    start = time.time()
     journey_to_destinations = run_raptor(
         timetable,
         origin_station,
         dep_secs,
         rounds,
     )
+    end = time.time()
 
     # Print journey to destination
     journey_to_destinations[destination_station].print(dep_secs=dep_secs)
+    logger.debug("Found in {:.2f} s.".format(end - start))
 
 
 def run_raptor(
