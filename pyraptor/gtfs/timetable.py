@@ -7,6 +7,7 @@ from collections import defaultdict
 
 import pandas as pd
 from loguru import logger
+from tqdm import tqdm
 
 from pyraptor.dao import write_timetable
 from pyraptor.util import mkdir_if_not_exists, str2sec, TRANSFER_COST
@@ -114,23 +115,16 @@ def read_gtfs_timetable(
             "route_id",
             "service_id",
             "trip_id",
-            "trip_short_name",
-            "trip_long_name",
         ]
     ]
-    trips["trip_short_name"] = trips["trip_short_name"].astype("Int64")
+    trips["trip_id"] = trips["trip_id"].astype("Int64")
 
     # Read calendar
-    logger.debug("Read Calendar")
+    logger.debug("Generate Calendar")
 
-    calendar = pd.read_csv(
-        os.path.join(input_folder, "calendar_dates.txt"), dtype={"date": str}
-    )
-    calendar = calendar[calendar.service_id.isin(trips.service_id.values)]
+    calendar = pd.DataFrame({'service_id': trips['service_id'].unique().tolist(), 'date': departure_date})
 
-    # Add date to trips and filter on departure date
     trips = trips.merge(calendar[["service_id", "date"]], on="service_id")
-    trips = trips[trips.date == departure_date]
 
     # Read stop times
     logger.debug("Read Stop Times")
@@ -163,23 +157,21 @@ def read_gtfs_timetable(
     ].copy()
 
     # Read stopareas, i.e. stations
-    stopareas = stops["parent_station"].unique()
+    stopareas = stops["stop_name"].unique()
     # stops = stops.append(.copy())
     stops = pd.concat([stops, stops_full.loc[stops_full["stop_id"].isin(stopareas)]])
 
     # stops["zone_id"] = stops["zone_id"].str.replace("IFF:", "").str.upper()
-    stops["stop_code"] = stops.stop_code.str.upper()
     stops = stops[
         [
             "stop_id",
-            "stop_name",
-            "parent_station",
-            "platform_code",
+            "stop_name"
         ]
     ]
+    stops['platform_code'] = '?'
 
     # Filter out the general station codes
-    stops = stops.loc[~stops.parent_station.isna()]
+    stops = stops.loc[~stops.stop_name.isna()]
 
     gtfs_timetable = GtfsTimetable()
     gtfs_timetable.trips = trips
@@ -226,10 +218,10 @@ def gtfs_to_pyraptor_timetable(
     trips = Trips()
     trip_stop_times = TripStopTimes()
 
-    for trip_row in gtfs_timetable.trips.itertuples():
+    for trip_row in tqdm(gtfs_timetable.trips.itertuples()):
         trip = Trip()
-        trip.hint = trip_row.trip_short_name  # i.e. treinnummer
-        trip.long_name = trip_row.trip_long_name  # e.g., Sprinter
+        trip.hint = trip_row.trip_id  # i.e. treinnummer
+        trip.long_name = trip_row.long_name  # e.g., Sprinter
 
         # Iterate over stops
         sort_stop_times = sorted(
