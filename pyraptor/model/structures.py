@@ -462,6 +462,7 @@ class Transfers:
     def __init__(self):
         self.set_idx = dict()
         self.stop_to_stop_idx = dict()
+        self.from_stop_idx = dict()
         self.last_id = 1
 
     def __repr__(self):
@@ -481,6 +482,7 @@ class Transfers:
         transfer.id = self.last_id
         self.set_idx[transfer.id] = transfer
         self.stop_to_stop_idx[(transfer.from_stop, transfer.to_stop)] = transfer
+        self.from_stop_idx[transfer.from_stop.id].add(transfer)
         self.last_id += 1
 
 

@@ -185,6 +185,8 @@ def read_gtfs_timetable(
             "to_stop_id"
         ]
     ]
+    transfers = transfers[transfers.from_stop_id.isin(stops.stop_id.values)]
+    transfers = transfers[transfers.to_stop_id.isin(stops.stop_id.values)]
 
     # Filter out the general station codes
     stops = stops.loc[~stops.stop_name.isna()]
@@ -213,6 +215,7 @@ def gtfs_to_pyraptor_timetable(
     stops = Stops()
 
     gtfs_timetable.stops.platform_code = gtfs_timetable.stops.platform_code.fillna("?")
+    transfers = Transfers()
 
     for s in tqdm(gtfs_timetable.stops.itertuples()):
         station = Station(s.stop_name, s.stop_name)
@@ -223,13 +226,17 @@ def gtfs_to_pyraptor_timetable(
 
         station.add_stop(stop)
         stops.add(stop)
+        transfers.from_stop_idx[s.stop_id] = set()  # init transfers so that all stops are possible from stop
 
     # Transfers
     logger.debug("Add transfers")
 
-    transfers = Transfers()
     for transfer in tqdm(gtfs_timetable.transfers.itertuples()):
-        transfers.add(Transfer(from_stop=transfer.from_stop_id, to_stop=transfer.to_stop_id, layovertime=TRANSFER_COST))
+        from_stop = stops.set_idx[transfer.from_stop_id]
+        to_stop = stops.set_idx[transfer.to_stop_id]
+        transfers.add(Transfer(from_stop=from_stop, to_stop=to_stop, layovertime=TRANSFER_COST))
+        # Add symmetric transfer (should be done only in case where the file states only one direction)
+        transfers.add(Transfer(from_stop=to_stop, to_stop=from_stop, layovertime=TRANSFER_COST))
 
     # Stop Times
     stop_times = defaultdict(list)

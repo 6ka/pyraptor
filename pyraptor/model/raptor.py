@@ -216,13 +216,11 @@ class RaptorAlgorithm:
 
         # Add in transfers to other platforms
         for current_stop in marked_stops:
-            other_station_stops = [
-                st for st in current_stop.station.stops if st != current_stop
-            ]
 
             time_sofar = bag_round_stop[k][current_stop].earliest_arrival_time
-            for arrive_stop in other_station_stops:
-                transfer_time = self.get_transfer_time(current_stop, arrive_stop)
+            for transfer in self.timetable.transfers.from_stop_idx[current_stop.id]:
+                arrive_stop = transfer.to_stop
+                transfer_time = transfer.layovertime
                 if transfer_time is not None:
                     new_earliest_arrival = time_sofar + transfer_time
                     previous_earliest_arrival = self.bag_star[
@@ -242,16 +240,6 @@ class RaptorAlgorithm:
                         new_stops.append(arrive_stop)
 
         return bag_round_stop, new_stops
-
-    def get_transfer_time(self, stop_from: Stop, stop_to: Stop) -> int:
-        """
-        Calculate the transfer time from a stop to another stop
-        """
-        transfers = self.timetable.transfers
-        if (stop_from, stop_to) in transfers.stop_to_stop_idx:
-            return transfers.stop_to_stop_idx[(stop_from, stop_to)].layovertime
-        else:
-            return None
 
 
 def best_stop_at_target_station(to_stops: List[Stop], bag: Dict[Stop, Label]) -> Stop:
