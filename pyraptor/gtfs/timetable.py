@@ -35,6 +35,7 @@ class GtfsTimetable:
     calendar = None
     stop_times = None
     stops = None
+    transfers = None
 
 
 def parse_arguments():
@@ -172,6 +173,19 @@ def read_gtfs_timetable(
     ]
     stops['platform_code'] = '?'
 
+    # Read transfers
+    logger.debug("Read transfers")
+
+    transfers = pd.read_csv(
+        os.path.join(input_folder, "transfers.txt"), dtype={"from_stop_id": str, "to_stop_id": str}
+    )
+    transfers = transfers[
+        [
+            "from_stop_id",
+            "to_stop_id"
+        ]
+    ]
+
     # Filter out the general station codes
     stops = stops.loc[~stops.stop_name.isna()]
 
@@ -179,6 +193,7 @@ def read_gtfs_timetable(
     gtfs_timetable.trips = trips
     gtfs_timetable.stop_times = stop_times
     gtfs_timetable.stops = stops
+    gtfs_timetable.transfers = transfers
 
     return gtfs_timetable
 
@@ -199,7 +214,7 @@ def gtfs_to_pyraptor_timetable(
 
     gtfs_timetable.stops.platform_code = gtfs_timetable.stops.platform_code.fillna("?")
 
-    for s in gtfs_timetable.stops.itertuples():
+    for s in tqdm(gtfs_timetable.stops.itertuples()):
         station = Station(s.stop_name, s.stop_name)
         station = stations.add(station)
 
@@ -208,6 +223,13 @@ def gtfs_to_pyraptor_timetable(
 
         station.add_stop(stop)
         stops.add(stop)
+
+    # Transfers
+    logger.debug("Add transfers")
+
+    transfers = Transfers()
+    for transfer in tqdm(gtfs_timetable.transfers.itertuples()):
+        transfers.add(Transfer(from_stop=transfer.from_stop_id, to_stop=transfer.to_stop_id, layovertime=TRANSFER_COST))
 
     # Stop Times
     stop_times = defaultdict(list)
@@ -223,7 +245,7 @@ def gtfs_to_pyraptor_timetable(
     for trip_row in tqdm(gtfs_timetable.trips.itertuples()):
         trip = Trip()
         trip.hint = trip_row.trip_id  # i.e. treinnummer
-        trip.long_name = trip_row.long_name  # e.g., Sprinter
+        trip.long_name = trip_row.trip_long_name  # e.g., Sprinter
 
         # Iterate over stops
         sort_stop_times = sorted(
@@ -254,21 +276,6 @@ def gtfs_to_pyraptor_timetable(
     routes = Routes()
     for trip in trips:
         routes.add(trip)
-
-    # Transfers
-    logger.debug("Add transfers")
-
-    transfers = Transfers()
-    for station in stations:
-        station_stops = station.stops
-        station_transfers = [
-            Transfer(from_stop=stop_i, to_stop=stop_j, layovertime=TRANSFER_COST)
-            for stop_i in station_stops
-            for stop_j in station_stops
-            if stop_i != stop_j
-        ]
-        for st in station_transfers:
-            transfers.add(st)
 
     # Timetable
     timetable = Timetable(
