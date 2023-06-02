@@ -53,7 +53,7 @@ class RaptorAlgorithm:
             for p in self.timetable.stops:
                 bag_round_stop[k][p] = Label()
 
-        # Initialize bag with earliest arrival tiems
+        # Initialize bag with earliest arrival times
         self.bag_star = {}
         for p in self.timetable.stops:
             self.bag_star[p] = Label()
@@ -222,33 +222,36 @@ class RaptorAlgorithm:
 
             time_sofar = bag_round_stop[k][current_stop].earliest_arrival_time
             for arrive_stop in other_station_stops:
-                new_earliest_arrival = time_sofar + self.get_transfer_time(
-                    current_stop, arrive_stop
-                )
-                previous_earliest_arrival = self.bag_star[
-                    arrive_stop
-                ].earliest_arrival_time
+                transfer_time = self.get_transfer_time(current_stop, arrive_stop)
+                if transfer_time is not None:
+                    new_earliest_arrival = time_sofar + transfer_time
+                    previous_earliest_arrival = self.bag_star[
+                        arrive_stop
+                    ].earliest_arrival_time
 
-                # Domination criteria
-                if new_earliest_arrival < previous_earliest_arrival:
-                    bag_round_stop[k][arrive_stop].update(
-                        new_earliest_arrival,
-                        TRANSFER_TRIP,
-                        current_stop,
-                    )
-                    self.bag_star[arrive_stop].update(
-                        new_earliest_arrival, TRANSFER_TRIP, current_stop
-                    )
-                    new_stops.append(arrive_stop)
+                    # Domination criteria
+                    if new_earliest_arrival < previous_earliest_arrival:
+                        bag_round_stop[k][arrive_stop].update(
+                            new_earliest_arrival,
+                            TRANSFER_TRIP,
+                            current_stop,
+                        )
+                        self.bag_star[arrive_stop].update(
+                            new_earliest_arrival, TRANSFER_TRIP, current_stop
+                        )
+                        new_stops.append(arrive_stop)
 
         return bag_round_stop, new_stops
 
     def get_transfer_time(self, stop_from: Stop, stop_to: Stop) -> int:
         """
-        Calculate the transfer time from a stop to another stop (usually at one station)
+        Calculate the transfer time from a stop to another stop
         """
         transfers = self.timetable.transfers
-        return transfers.stop_to_stop_idx[(stop_from, stop_to)].layovertime
+        if (stop_from, stop_to) in transfers.stop_to_stop_idx:
+            return transfers.stop_to_stop_idx[(stop_from, stop_to)].layovertime
+        else:
+            return None
 
 
 def best_stop_at_target_station(to_stops: List[Stop], bag: Dict[Stop, Label]) -> Stop:
