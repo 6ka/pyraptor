@@ -23,8 +23,12 @@ class McRaptorAlgorithm:
         self.timetable = timetable
 
     def run(
-        self, from_stops: List[Stop], dep_secs: int, rounds: int, previous_run: Dict[int, Bag] = None
-    ) -> Dict[int, Dict[int, Bag]]:
+        self,
+        from_stops: List[Stop],
+        dep_secs: int,
+        rounds: int,
+        previous_run: Dict[int, Bag] = None,
+    ) -> Tuple[Dict[int, Dict[int, Bag]], int]:
         """Run Round-Based Algorithm"""
 
         s = perf_counter()
@@ -40,7 +44,7 @@ class McRaptorAlgorithm:
         logger.debug(f"Starting from Stop IDs: {str(from_stops)}")
 
         # Initialize bag for round 0, i.e. add Labels with criterion 0 for all from stops
-        if previous_run != None:
+        if previous_run is not None:
             # For the range query
             bag_round_stop[0] = copy(previous_run)
 
@@ -288,7 +292,7 @@ def reconstruct_journeys(
 
             # End of journey if we are at origin stop or journey is not feasible
             if current_leg.trip is None or current_leg.from_stop in from_stops:
-                jrny = jrny.remove_transfer_legs()
+                jrny = jrny.remove_same_stop_transfer_legs()
                 if jrny.is_valid() is True:
                     yield jrny
                 continue

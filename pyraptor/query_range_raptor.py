@@ -96,6 +96,7 @@ def main(
     journeys_to_destinations = run_range_raptor(
         timetable,
         origin_station,
+        destination_station,
         dep_secs_min,
         dep_secs_max,
         rounds,
@@ -103,27 +104,25 @@ def main(
 
     # All destinations are present in labels, so this is only for logging purposes
     logger.info(f"Journeys to destination station '{destination_station}'")
-    for jrny in journeys_to_destinations[destination_station][::-1]:
+    for jrny in journeys_to_destinations[::-1]:
         jrny.print()
 
 
 def run_range_raptor(
     timetable: Timetable,
     origin_station: str,
+    destination_station: str,
     dep_secs_min: int,
     dep_secs_max: int,
     rounds: int,
-) -> Dict[str, List[Journey]]:
+) -> List[Journey]:
     """
     Perform the RAPTOR algorithm for a range query
     """
 
     # Get stops for origins and destinations
     from_stops = timetable.stations.get_stops(origin_station)
-    destination_stops = {
-        st.name: timetable.stations.get_stops(st.name) for st in timetable.stations
-    }
-    destination_stops.pop(origin_station, None)
+    to_stops = timetable.stations.get_stops(destination_station)
 
     # Find all trips leaving from stops within time range
     potential_trip_stop_times = timetable.trip_stop_times.get_trip_stop_times_in_range(
@@ -139,12 +138,8 @@ def run_range_raptor(
         )
     )
 
-    journeys_to_destinations = {
-        station_name: [] for station_name, _ in destination_stops.items()
-    }
-    last_round_labels = {
-        station_name: None for station_name, _ in destination_stops.items()
-    }
+    journeys_to_destinations = []
+    last_round_labels = None
 
     for dep_index, dep_secs in enumerate(potential_dep_secs):
         logger.info(f"Processing {dep_index} / {len(potential_dep_secs)}")
@@ -152,20 +147,17 @@ def run_range_raptor(
 
         # Run Round-Based Algorithm
         raptor = RaptorAlgorithm(timetable)
-        bag_round_stop = raptor.run(from_stops, dep_secs, rounds)
-        best_labels = bag_round_stop[rounds]
+        best_labels = raptor.run(from_stops, timetable.stations[destination_station], dep_secs, rounds)
 
         # Determine the best destination ID, destination is a platform
-        for destination_station_name, to_stops in destination_stops.items():
-            dest_stop = best_stop_at_target_station(to_stops, best_labels)
+        dest_stop = best_stop_at_target_station(to_stops, best_labels)
 
-            if dest_stop != 0:
-                journey = reconstruct_journey(dest_stop, best_labels)
-                last_round_journey = last_round_labels[destination_station_name]
-                last_round_labels[destination_station_name] = journey
+        if dest_stop != 0:
+            journey = reconstruct_journey(dest_stop, best_labels)
 
-                if not is_dominated(last_round_journey, journey):
-                    journeys_to_destinations[destination_station_name].append(journey)
+            if len(journeys_to_destinations) == 0 \
+                    or not is_dominated(journeys_to_destinations[-1], journey):
+                journeys_to_destinations.append(journey)
 
     return journeys_to_destinations
 

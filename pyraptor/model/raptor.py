@@ -23,8 +23,7 @@ class Label:
         """Update"""
         if earliest_arrival_time is not None:
             self.earliest_arrival_time = earliest_arrival_time
-        if trip is not None:
-            self.trip = trip
+        self.trip = trip
         if from_stop is not None:
             self.from_stop = from_stop
 
@@ -42,8 +41,10 @@ class RaptorAlgorithm:
     def __init__(self, timetable: Timetable):
         self.timetable = timetable
         self.bag_star = None
+        self.destination_stops = None
+        self.earliest_arrival_at_destination = LARGE_NUMBER
 
-    def run(self, from_stops, dep_secs, rounds) -> Dict[int, Dict[Stop, Label]]:
+    def run(self, from_stops, to_station, dep_secs, rounds) -> Dict[Stop, Label]:
         """Run Round-Based Algorithm"""
 
         # Initialize empty bag of labels, i.e. B_k(p) = Label() for every k and p
@@ -52,6 +53,9 @@ class RaptorAlgorithm:
             bag_round_stop[k] = {}
             for p in self.timetable.stops:
                 bag_round_stop[k][p] = Label()
+            for s in self.timetable.stations:
+                bag_round_stop[k][s] = Label()
+        self.destination_stops = {stop for stop in to_station.stops}
 
         # Initialize bag with earliest arrival times
         self.bag_star = {}
@@ -69,7 +73,6 @@ class RaptorAlgorithm:
         # Run rounds
         for k in range(1, rounds + 1):
             logger.info(f"Analyzing possibilities round {k}")
-            bag_round_stop[k] = deepcopy(bag_round_stop[k - 1])
 
             # Get list of stops to evaluate in the process
             logger.debug(f"Stops to evaluate count: {len(marked_stops)}")
@@ -80,7 +83,7 @@ class RaptorAlgorithm:
 
                 # Update time to stops calculated based on stops reachable
                 bag_round_stop, marked_trip_stops = self.traverse_routes(
-                    bag_round_stop, k, route_marked_stops
+                    bag_round_stop, k, route_marked_stops, to_station
                 )
                 logger.debug(f"{len(marked_trip_stops)} reachable stops added")
 
@@ -95,9 +98,9 @@ class RaptorAlgorithm:
             else:
                 break
 
-        logger.info("Finish round-based algorithm to create bag with best labels")   
+        logger.info("Finish round-based algorithm to create bag with best labels")
 
-        return bag_round_stop
+        return self.bag_star
 
     def accumulate_routes(self, marked_stops: List[Stop]) -> List[Tuple[Route, Stop]]:
         """Accumulate routes serving marked stops from previous round, i.e. Q"""
@@ -121,6 +124,7 @@ class RaptorAlgorithm:
         bag_round_stop: Dict[int, Dict[Stop, Label]],
         k: int,
         route_marked_stops: List[Tuple[Route, Stop]],
+        to_station: Stop
     ) -> Tuple:
         """
         Iterator through the stops reachable and add all new reachable stops
@@ -130,10 +134,10 @@ class RaptorAlgorithm:
         :param bag_round_stop: Bag per round per stop
         :param k: current round
         :param route_marked_stops: list of marked (route, stop) for evaluation
+        :param to_station: destination station
         """
         logger.debug(f"Traverse routes for round {k}")
 
-        bag_round_stop = deepcopy(bag_round_stop)
         new_stops = []
         n_evaluations = 0
         n_improvements = 0
@@ -157,11 +161,12 @@ class RaptorAlgorithm:
                 if current_trip is not None:
                     # Arrival time at stop, i.e. arr(current_trip, next_stop)
                     new_arrival_time = current_trip.get_stop(current_stop).dts_arr
-                    best_arrival_time = self.bag_star[
+                    best_arrival_time_in_stop = self.bag_star[
                         current_stop
                     ].earliest_arrival_time
 
-                    if new_arrival_time < best_arrival_time:
+                    if new_arrival_time < best_arrival_time_in_stop \
+                            and new_arrival_time < self.earliest_arrival_at_destination:
                         # Update arrival by trip, i.e.
                         #   t_k(next_stop) = t_arr(t, pi)
                         #   t_star(p_i) = t_arr(t, pi)
@@ -173,25 +178,27 @@ class RaptorAlgorithm:
                             new_arrival_time, current_trip, boarding_stop
                         )
 
+                        # Update the earliest arrival time at destination if needed
+                        if current_stop in self.destination_stops:
+                            self.earliest_arrival_at_destination = new_arrival_time
+
                         # Logging
                         n_improvements += 1
                         new_stops.append(current_stop)
 
                 # Can we catch an earlier trip at p_i
-                # if tau_{k-1}(next_stop) <= tau_dep(t, next_stop)
-                previous_earliest_arrival_time = bag_round_stop[k][
-                    current_stop
-                ].earliest_arrival_time
-                earliest_trip_stop_time = marked_route.earliest_trip_stop_time(
-                    previous_earliest_arrival_time, current_stop
-                )
+                # if tau_{k-1}(current_stop) <= tau_dep(t, current_stop)
+                previous_earliest_arrival_time = bag_round_stop[k - 1][current_stop].earliest_arrival_time
                 if (
-                    earliest_trip_stop_time is not None
-                    and previous_earliest_arrival_time
-                    <= earliest_trip_stop_time.dts_dep
+                        current_trip is None  # need to try to find a current_trip
+                        or previous_earliest_arrival_time <= current_trip.get_stop(current_stop).dts_dep
                 ):
-                    current_trip = earliest_trip_stop_time.trip
-                    boarding_stop = current_stop
+                    earliest_trip_stop_time = marked_route.earliest_trip_stop_time(
+                        previous_earliest_arrival_time, current_stop
+                    )
+                    if earliest_trip_stop_time is not None and earliest_trip_stop_time.trip != current_trip:
+                        current_trip = earliest_trip_stop_time.trip
+                        boarding_stop = current_stop
 
         logger.debug(f"- Evaluations    : {n_evaluations}")
         logger.debug(f"- Improvements   : {n_improvements}")
@@ -244,14 +251,13 @@ class RaptorAlgorithm:
 
 def best_stop_at_target_station(to_stops: List[Stop], bag: Dict[Stop, Label]) -> Stop:
     """
-    Find the destination Stop with the shortest distance.
-    Required in order to prevent adding travel time to the arrival time.
+    Find the destination Stop with the earliest_arrival_time.
     """
     final_stop = 0
-    distance = LARGE_NUMBER
+    earliest_arrival_time = LARGE_NUMBER
     for stop in to_stops:
-        if bag[stop].earliest_arrival_time < distance:
-            distance = bag[stop].earliest_arrival_time
+        if bag[stop].earliest_arrival_time < earliest_arrival_time:
+            earliest_arrival_time = bag[stop].earliest_arrival_time
             final_stop = stop
     return final_stop
 
@@ -260,23 +266,21 @@ def reconstruct_journey(destination: Stop, bag: Dict[Stop, Label]) -> Journey:
     """Construct journey for destination from values in bag."""
 
     # Create journey with list of legs
-    jrny = Journey()
+    journey = Journey()
     to_stop = destination
-    while to_stop is not None:
+    while bag[to_stop].from_stop is not None:
         from_stop = bag[to_stop].from_stop
         bag_to_stop = bag[to_stop]
         leg = Leg(
             from_stop, to_stop, bag_to_stop.trip, bag_to_stop.earliest_arrival_time
         )
-        jrny = jrny.prepend_leg(leg)
+        journey = journey.prepend_leg(leg)
         to_stop = from_stop
 
-    jrny = jrny.remove_transfer_legs()
-
-    return jrny
+    return journey
 
 
-def is_dominated(original_journey: List[Leg], new_journey: List[Leg]) -> bool:
+def is_dominated(original_journey: Journey, new_journey: Journey) -> bool:
     """Check if new journey is dominated by another journey"""
     # None if first journey
     if not original_journey:
@@ -286,18 +290,11 @@ def is_dominated(original_journey: List[Leg], new_journey: List[Leg]) -> bool:
     if original_journey == new_journey:
         return True
 
-    def depart(jrny: List[Leg]) -> int:
-        depart_leg = jrny[0] if jrny[0].trip is not None else jrny[1]
-        return depart_leg.dep
+    original_depart = original_journey.dep()
+    new_depart = new_journey.dep()
 
-    def arrival(jrny: List[Leg]) -> int:
-        return jrny[-1].arr
-
-    original_depart = depart(original_journey)
-    new_depart = depart(new_journey)
-
-    original_arrival = arrival(original_journey)
-    new_arrival = arrival(new_journey)
+    original_arrival = original_journey.arr()
+    new_arrival = new_journey.arr()
 
     # Is dominated, strictly better in one criteria and not worse in other
     return (

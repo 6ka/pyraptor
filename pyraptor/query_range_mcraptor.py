@@ -7,7 +7,7 @@ from time import perf_counter
 from loguru import logger
 
 from pyraptor.dao.timetable import read_timetable
-from pyraptor.model.structures import Timetable, Journey, pareto_set
+from pyraptor.model.structures import Timetable, Journey
 from pyraptor.model.mcraptor import (
     McRaptorAlgorithm,
     best_legs_to_destination_station,
@@ -150,13 +150,18 @@ def run_range_mcraptor(
     for dep_index, dep_secs in enumerate(potential_dep_secs):
         logger.info(f"Processing {dep_index} / {len(potential_dep_secs)}")
         logger.info(f"Analyzing best journey for departure time {sec2str(dep_secs)}")
+        last_round_bag = None
 
         # Run Round-Based Algorithm
         mcraptor = McRaptorAlgorithm(timetable)
         if dep_index == 0:
-            bag_round_stop, actual_rounds = mcraptor.run(from_stops, dep_secs, max_rounds)
+            bag_round_stop, actual_rounds = mcraptor.run(
+                from_stops, dep_secs, max_rounds
+            )
         else:
-            bag_round_stop, actual_rounds = mcraptor.run(from_stops, dep_secs, max_rounds, last_round_bag)
+            bag_round_stop, actual_rounds = mcraptor.run(
+                from_stops, dep_secs, max_rounds, last_round_bag
+            )
         last_round_bag = copy(bag_round_stop[actual_rounds])
 
         # Determine the best destination ID, destination is a platform
@@ -177,11 +182,11 @@ def run_range_mcraptor(
     for destination_station_name, journeys in journeys_to_destinations.items():
         unique_journeys = []
         for journey in journeys:
-            if not journey in unique_journeys:
+            if journey not in unique_journeys:
                 unique_journeys.append(journey)
 
         journeys_to_destinations[destination_station_name] = unique_journeys
-        
+
     return journeys_to_destinations
 
 

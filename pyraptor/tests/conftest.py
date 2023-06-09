@@ -1,12 +1,11 @@
 """conftest"""
-import datetime
 
 import pytest
 import pandas as pd
 import numpy as np
 
 from pyraptor.model.structures import Timetable
-from tests.utils import to_stops_and_trips, to_timetable
+from pyraptor.tests.utils import to_stops_and_trips, to_timetable
 
 
 @pytest.fixture(scope="session")

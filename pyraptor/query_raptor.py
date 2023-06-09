@@ -1,11 +1,10 @@
 """Run query with RAPTOR algorithm"""
 import argparse
-from typing import Dict
 
 from loguru import logger
 
 from pyraptor.dao.timetable import read_timetable
-from pyraptor.model.structures import Journey, Station, Timetable
+from pyraptor.model.structures import Journey, Timetable
 from pyraptor.model.raptor import (
     RaptorAlgorithm,
     reconstruct_journey,
@@ -81,52 +80,47 @@ def main(
     journey_to_destinations = run_raptor(
         timetable,
         origin_station,
+        destination_station,
         dep_secs,
         rounds,
     )
     end = time.time()
 
     # Print journey to destination
-    journey_to_destinations[destination_station].print(dep_secs=dep_secs)
+    journey_to_destinations.print(dep_secs=dep_secs)
     logger.debug("Found in {:.2f} s.".format(end - start))
 
 
 def run_raptor(
     timetable: Timetable,
     origin_station: str,
+    destination_station: str,
     dep_secs: int,
     rounds: int,
-) -> Dict[Station, Journey]:
+) -> Journey:
     """
     Run the Raptor algorithm.
 
     :param timetable: timetable
     :param origin_station: Name of origin station
+    :param destination_station: Name of destination station
     :param dep_secs: Time of departure in seconds
     :param rounds: Number of iterations to perform
     """
 
     # Get stops for origin and all destinations
     from_stops = timetable.stations.get(origin_station).stops
-    destination_stops = {
-        st.name: timetable.stations.get_stops(st.name) for st in timetable.stations
-    }
-    destination_stops.pop(origin_station, None)
+    to_stops = timetable.stations.get(destination_station).stops
 
     # Run Round-Based Algorithm
     raptor = RaptorAlgorithm(timetable)
-    bag_round_stop = raptor.run(from_stops, dep_secs, rounds)
-    best_labels = bag_round_stop[rounds]
+    best_labels = raptor.run(from_stops, timetable.stations[destination_station], dep_secs, rounds)
+
 
     # Determine the best journey to all possible destination stations
-    journey_to_destinations = dict()
-    for destination_station_name, to_stops in destination_stops.items():
-        dest_stop = best_stop_at_target_station(to_stops, best_labels)
-        if dest_stop != 0:
-            journey = reconstruct_journey(dest_stop, best_labels)
-            journey_to_destinations[destination_station_name] = journey
-
-    return journey_to_destinations
+    dest_stop = best_stop_at_target_station(to_stops, best_labels)
+    if dest_stop != 0:
+        return reconstruct_journey(dest_stop, best_labels)
 
 
 if __name__ == "__main__":

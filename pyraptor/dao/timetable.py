@@ -5,6 +5,7 @@ from pathlib import Path
 from loguru import logger
 import joblib
 
+
 from pyraptor.model.structures import Timetable
 from pyraptor.util import mkdir_if_not_exists
 
@@ -21,7 +22,7 @@ def read_timetable(input_folder: str) -> Timetable:
 
     if not os.path.exists(input_folder):
         raise IOError(
-            "PyRaptor timetable not found. Run `python pyraptor/gtfs/timetable.py`"
+            "PyRaptor timetable not found. Run `python engine/gtfs/timetable.py`"
             " first to create timetable from GTFS files."
         )
 

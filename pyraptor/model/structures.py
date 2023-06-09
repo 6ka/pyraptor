@@ -4,7 +4,7 @@ from __future__ import annotations
 from itertools import compress
 from collections import defaultdict
 from operator import attrgetter
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 from dataclasses import dataclass, field
 from copy import copy
 
@@ -229,18 +229,6 @@ class TripStopTimes:
         ]
         return in_window
 
-    def get_earliest_trip(self, stop: Stop, dep_secs: int) -> Trip:
-        """Earliest trip"""
-        trip_stop_times = self.stop_trip_idx[stop]
-        in_window = [tst for tst in trip_stop_times if tst.dts_dep >= dep_secs]
-        return in_window[0].trip if len(in_window) > 0 else None
-
-    def get_earliest_trip_stop_time(self, stop: Stop, dep_secs: int) -> TripStopTime:
-        """Earliest trip stop time"""
-        trip_stop_times = self.stop_trip_idx[stop]
-        in_window = [tst for tst in trip_stop_times if tst.dts_dep >= dep_secs]
-        return in_window[0] if len(in_window) > 0 else None
-
 
 @attr.s(repr=False, cmp=False)
 class Trip:
@@ -290,7 +278,7 @@ class Trip:
     def get_stop(self, stop: Stop) -> TripStopTime:
         """Get stop"""
         return self.stop_times[self.stop_times_index[stop]]
-    
+
     def get_fare(self, depart_stop: Stop) -> int:
         """Get fare from depart_stop"""
         stop_time = self.get_stop(depart_stop)
@@ -335,6 +323,7 @@ class Route:
     trips = attr.ib(default=attr.Factory(list))
     stops = attr.ib(default=attr.Factory(list))
     stop_order = attr.ib(default=attr.Factory(dict))
+    trip_stop_times = attr.ib(default=attr.Factory(dict))  # ordered stop times of trips per stop
 
     def __hash__(self):
         return hash(self.id)
@@ -343,7 +332,10 @@ class Route:
         return same_type_and_id(self, trip)
 
     def __repr__(self):
-        return "Route(id={0.id}, trips={trips})".format(self, trips=len(self.trips),)
+        return "Route(id={0.id}, trips={trips})".format(
+            self,
+            trips=len(self.trips),
+        )
 
     def __getitem__(self, n):
         return self.trips[n]
@@ -357,16 +349,23 @@ class Route:
     def add_trip(self, trip: Trip) -> None:
         """Add trip"""
         self.trips.append(trip)
+        for trip_stop_time in trip.stop_times:
+            self.trip_stop_times[trip_stop_time.stop].append(trip_stop_time)
 
     def add_stop(self, stop: Stop) -> None:
         """Add stop"""
         self.stops.append(stop)
         # (re)make dict to save the order of the stops in the route
         self.stop_order = {stop: index for index, stop in enumerate(self.stops)}
+        self.trip_stop_times[stop] = []
 
     def stop_index(self, stop: Stop):
         """Stop index"""
         return self.stop_order[stop]
+
+    def order_trip_stop_times(self):
+        for trip_stop_time in self.trip_stop_times:
+            self.trip_stop_times[trip_stop_time].sort(key=lambda tst: tst.dts_dep)
 
     def earliest_trip(self, dts_arr: int, stop: Stop) -> Trip:
         """Returns earliest trip after time dts (sec)"""
@@ -376,13 +375,13 @@ class Route:
         trip_stop_times = sorted(trip_stop_times, key=attrgetter("dts_dep"))
         return trip_stop_times[0].trip if len(trip_stop_times) > 0 else None
 
-    def earliest_trip_stop_time(self, dts_arr: int, stop: Stop) -> TripStopTime:
+    def earliest_trip_stop_time(self, dts_arr: int, stop: Stop) -> TripStopTime | None:
         """Returns earliest trip stop time after time dts (sec)"""
-        stop_idx = self.stop_index(stop)
-        trip_stop_times = [trip.stop_times[stop_idx] for trip in self.trips]
-        trip_stop_times = [tst for tst in trip_stop_times if tst.dts_dep >= dts_arr]
-        trip_stop_times = sorted(trip_stop_times, key=attrgetter("dts_dep"))
-        return trip_stop_times[0] if len(trip_stop_times) > 0 else None
+        trip_stop_times_of_stop = self.trip_stop_times[stop]
+        for trip_stop_time in trip_stop_times_of_stop:  # trip_stop_times_of_stop is ordered so return the first larger
+            if trip_stop_time.dts_dep >= dts_arr:
+                return trip_stop_time
+        return None
 
 
 class Routes:
@@ -435,6 +434,14 @@ class Routes:
     def get_routes_of_stop(self, stop: Stop):
         """Get routes of stop"""
         return self.stop_to_routes[stop]
+
+    def order_trips_per_stop_by_time(self):
+        sorted_routes = set()
+        for stop in self.stop_to_routes:
+            for route_of_stop in self.stop_to_routes[stop]:
+                if route_of_stop.id not in sorted_routes:
+                    sorted_routes.add(route_of_stop.id)
+                    route_of_stop.order_trip_stop_times()
 
 
 @attr.s(repr=False, cmp=False)
@@ -639,7 +646,7 @@ class Bag:
 
     def labels_with_trip(self):
         """All labels with trips, i.e. all labels that are reachable with a trip with given criterion"""
-        return [l for l in self.labels if l.trip is not None]
+        return [label for label in self.labels if label.trip is not None]
 
     def earliest_arrival(self) -> int:
         """Earliest arrival"""
@@ -671,7 +678,7 @@ class Journey:
 
     def number_of_trips(self):
         """Return number of distinct trips"""
-        trips = set([l.trip for l in self.legs])
+        trips = set([label.trip for label in self.legs])
         return len(trips)
 
     def prepend_leg(self, leg: Leg) -> Journey:
@@ -681,15 +688,15 @@ class Journey:
         jrny = Journey(legs=legs)
         return jrny
 
-    def remove_transfer_legs(self) -> Journey:
-        """Remove all transfer legs"""
+    def remove_same_stop_transfer_legs(self) -> Journey:
+        """Remove transfer legs from a stop to itself"""
         legs = [
             leg
             for leg in self.legs
             if (leg.trip is not None) and (leg.from_stop.station != leg.to_stop.station)
         ]
-        jrny = Journey(legs=legs)
-        return jrny
+        journey = Journey(legs=legs)
+        return journey
 
     def is_valid(self) -> bool:
         """Is valid journey"""
@@ -712,11 +719,20 @@ class Journey:
 
     def dep(self) -> int:
         """Departure time"""
-        return self.legs[0].dep
+        first_voyage_leg_id = 0
+        while first_voyage_leg_id < len(self.legs):
+            if self.legs[first_voyage_leg_id].trip is not None:
+                return self.legs[first_voyage_leg_id].dep
+        return self.legs[first_voyage_leg_id].dep
 
     def arr(self) -> int:
         """Arrival time"""
-        return self.legs[-1].arr
+        last_voyage_leg_id = len(self.legs) - 1
+        while last_voyage_leg_id != 0:
+            if self.legs[last_voyage_leg_id].trip is not None:
+                return self.legs[last_voyage_leg_id].arr
+            last_voyage_leg_id -= 1
+        return self.legs[last_voyage_leg_id].arr
 
     def travel_time(self) -> int:
         """Travel time in seconds"""
@@ -748,19 +764,19 @@ class Journey:
         # Print all legs in journey
         for leg in self:
             msg = (
-                str(sec2str(leg.dep))
+                str(sec2str(leg.dep) if leg.trip is not None else "")
                 + " "
                 + leg.from_stop.station.name.ljust(20)
                 + "(p. "
                 + str(leg.from_stop.platform_code).rjust(3)
                 + ") TO "
-                + str(sec2str(leg.arr))
+                + str(sec2str(leg.arr) if leg.trip is not None else "")
                 + " "
                 + leg.to_stop.station.name.ljust(20)
                 + "(p. "
                 + str(leg.to_stop.platform_code).rjust(3)
                 + ") WITH "
-                + str(leg.trip.long_name)
+                + str(leg.trip.long_name if leg.trip is not None else "TRANSFER")
             )
             logger.info(msg)
 
@@ -769,7 +785,8 @@ class Journey:
         msg = f"Duration: {sec2str(self.travel_time())}"
         if dep_secs:
             msg += " ({} from request time {})".format(
-                sec2str(self.arr() - dep_secs), sec2str(dep_secs),
+                sec2str(self.arr() - dep_secs),
+                sec2str(dep_secs),
             )
         logger.info(msg)
         logger.info("")
@@ -777,6 +794,7 @@ class Journey:
     def to_list(self) -> List[Dict]:
         """Convert journey to list of legs as dict"""
         return [leg.to_dict(leg_index=idx) for idx, leg in enumerate(self.legs)]
+
 
 def pareto_set(labels: List[Label], keep_equal=False):
     """

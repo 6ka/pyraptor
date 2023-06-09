@@ -9,7 +9,6 @@ import pandas as pd
 from loguru import logger
 from tqdm import tqdm
 
-from pyraptor.dao import write_timetable
 from pyraptor.util import mkdir_if_not_exists, str2sec, TRANSFER_COST
 from pyraptor.model.structures import (
     Timetable,
@@ -25,6 +24,8 @@ from pyraptor.model.structures import (
     Transfer,
     Transfers,
 )
+
+from pyraptor.dao.timetable import write_timetable
 
 
 @dataclass
@@ -118,14 +119,16 @@ def read_gtfs_timetable(
             "trip_id",
         ]
     ]
-    trips['trip_id'] = trips['trip_id'].astype("str")
-    trips['trip_long_name'] = trips['route_id'].str.cat(trips['trip_id'], sep='-')
-    trips['trip_id'] = trips['trip_id'].astype("Int64")
+    trips["trip_id"] = trips["trip_id"].astype("str")
+    trips["trip_long_name"] = trips["route_id"].str.cat(trips["trip_id"], sep="-")
+    trips["trip_id"] = trips["trip_id"].astype("Int64")
 
     # Read calendar
     logger.debug("Generate Calendar")
 
-    calendar = pd.DataFrame({'service_id': trips['service_id'].unique().tolist(), 'date': departure_date})
+    calendar = pd.DataFrame(
+        {"service_id": trips["service_id"].unique().tolist(), "date": departure_date}
+    )
 
     trips = trips.merge(calendar[["service_id", "date"]], on="service_id")
 
@@ -165,26 +168,17 @@ def read_gtfs_timetable(
     stops = pd.concat([stops, stops_full.loc[stops_full["stop_id"].isin(stopareas)]])
 
     # stops["zone_id"] = stops["zone_id"].str.replace("IFF:", "").str.upper()
-    stops = stops[
-        [
-            "stop_id",
-            "stop_name"
-        ]
-    ]
-    stops['platform_code'] = '?'
+    stops = stops[["stop_id", "stop_name"]]
+    stops["platform_code"] = "?"
 
     # Read transfers
     logger.debug("Read transfers")
 
     transfers = pd.read_csv(
-        os.path.join(input_folder, "transfers.txt"), dtype={"from_stop_id": str, "to_stop_id": str}
+        os.path.join(input_folder, "transfers.txt"),
+        dtype={"from_stop_id": str, "to_stop_id": str},
     )
-    transfers = transfers[
-        [
-            "from_stop_id",
-            "to_stop_id"
-        ]
-    ]
+    transfers = transfers[["from_stop_id", "to_stop_id"]]
     transfers = transfers[transfers.from_stop_id.isin(stops.stop_id.values)]
     transfers = transfers[transfers.to_stop_id.isin(stops.stop_id.values)]
 
@@ -226,7 +220,9 @@ def gtfs_to_pyraptor_timetable(
 
         station.add_stop(stop)
         stops.add(stop)
-        transfers.from_stop_idx[s.stop_id] = set()  # init transfers so that all stops are possible from stop
+        transfers.from_stop_idx[
+            s.stop_id
+        ] = set()  # init transfers so that all stops are possible from stop
 
     # Transfers
     logger.debug("Add transfers")
@@ -234,9 +230,13 @@ def gtfs_to_pyraptor_timetable(
     for transfer in tqdm(gtfs_timetable.transfers.itertuples()):
         from_stop = stops.set_idx[transfer.from_stop_id]
         to_stop = stops.set_idx[transfer.to_stop_id]
-        transfers.add(Transfer(from_stop=from_stop, to_stop=to_stop, layovertime=TRANSFER_COST))
+        transfers.add(
+            Transfer(from_stop=from_stop, to_stop=to_stop, layovertime=TRANSFER_COST)
+        )
         # Add symmetric transfer (should be done only in case where the file states only one direction)
-        transfers.add(Transfer(from_stop=to_stop, to_stop=from_stop, layovertime=TRANSFER_COST))
+        transfers.add(
+            Transfer(from_stop=to_stop, to_stop=from_stop, layovertime=TRANSFER_COST)
+        )
 
     # Stop Times
     stop_times = defaultdict(list)
@@ -251,8 +251,8 @@ def gtfs_to_pyraptor_timetable(
 
     for trip_row in tqdm(gtfs_timetable.trips.itertuples()):
         trip = Trip()
-        trip.hint = trip_row.trip_id  # i.e. treinnummer
-        trip.long_name = trip_row.trip_long_name  # e.g., Sprinter
+        trip.hint = trip_row.trip_id
+        trip.long_name = trip_row.trip_long_name
 
         # Iterate over stops
         sort_stop_times = sorted(
@@ -283,6 +283,8 @@ def gtfs_to_pyraptor_timetable(
     routes = Routes()
     for trip in trips:
         routes.add(trip)
+
+    routes.order_trips_per_stop_by_time()
 
     # Timetable
     timetable = Timetable(
